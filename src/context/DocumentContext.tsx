@@ -123,7 +123,22 @@ export const DocumentProvider: React.FC<{
   // Save documents to localStorage whenever they change
   useEffect(() => {
     if (documents.length > 0) {
-      localStorage.setItem('documents', JSON.stringify(documents));
+      try {
+        // Create a sanitized copy of documents for storage
+        const sanitizedDocs = documents.map(doc => ({
+          ...doc,
+          lastModified: doc.lastModified.toISOString(),
+          createdAt: doc.createdAt ? doc.createdAt.toISOString() : new Date().toISOString(),
+          lastSaved: doc.lastSaved ? doc.lastSaved.toISOString() : null,
+          versionHistory: (doc.versionHistory || []).map(version => ({
+            ...version,
+            timestamp: version.timestamp.toISOString()
+          }))
+        }));
+        localStorage.setItem('documents', JSON.stringify(sanitizedDocs));
+      } catch (e) {
+        console.error('Failed to save documents to localStorage:', e);
+      }
     }
   }, [documents]);
   // Update undo/redo availability
@@ -133,11 +148,19 @@ export const DocumentProvider: React.FC<{
   }, [historyIndex, history.length]);
   // Add current document state to history
   const addToHistory = useCallback((doc: Document) => {
+    // Create a clean copy of the document for history
+    const historyCopy = {
+      ...doc,
+      sentences: doc.sentences.map(s => ({
+        ...s
+      })),
+      versionHistory: undefined // Don't store version history in history states
+    };
     // Trim history if we're not at the end
     const newHistory = history.slice(0, historyIndex + 1);
     // Add new state
     setHistory([...newHistory, {
-      document: JSON.parse(JSON.stringify(doc)),
+      document: historyCopy,
       timestamp: new Date()
     }]);
     setHistoryIndex(newHistory.length);
@@ -787,51 +810,71 @@ export const DocumentProvider: React.FC<{
   }, [generateSuggestions, simulateCloudSave]);
   // Download a document
   const downloadDocument = useCallback((docId: string, format: ExportFormat, type: ExportType) => {
-    const document = documents.find(doc => doc.id === docId);
-    if (!document) return;
-    let content = '';
-    if (type === 'original') {
-      // Original content (without any changes)
-      content = document.sentences.map(s => s.text).join(' ');
-    } else {
-      // Edited content (with accepted changes)
-      content = document.sentences.map(s => {
-        if (s.status === 'accepted') {
-          return s.suggestion;
-        }
-        return s.text;
-      }).join(' ');
-    }
-    // Format the content based on the requested format
-    let formattedContent = content;
-    let mimeType = 'text/plain';
-    let extension = 'txt';
-    if (format === 'md') {
-      // Simple markdown formatting
-      formattedContent = `# ${document.name}\n\n${content}`;
-      mimeType = 'text/markdown';
-      extension = 'md';
-    } else if (format === 'docx') {
-      // In a real app, we would use a library to create a proper DOCX file
-      // For this demo, we'll just use plain text with a .docx extension
-      mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      extension = 'docx';
-    }
-    // Create a download link
     try {
+      console.log(`Starting download process for document ID: ${docId}, format: ${format}, type: ${type}`);
+      const document = documents.find(doc => doc.id === docId);
+      if (!document) {
+        console.error('Download failed: Document not found');
+        alert('Download failed: Document not found');
+        return;
+      }
+      // Prepare content based on type (original or edited)
+      let content = '';
+      if (type === 'original') {
+        content = document.sentences.map(s => s.text).join(' ');
+      } else {
+        content = document.sentences.map(s => {
+          if (s.status === 'accepted') {
+            return s.suggestion;
+          }
+          return s.text;
+        }).join(' ');
+      }
+      // Format the content based on requested format
+      let formattedContent = content;
+      let mimeType = 'text/plain';
+      let extension = 'txt';
+      if (format === 'md') {
+        formattedContent = `# ${document.name}\n\n${content}`;
+        mimeType = 'text/markdown';
+        extension = 'md';
+      } else if (format === 'docx') {
+        // For DOCX, we'll use a generic binary data type
+        mimeType = 'application/octet-stream';
+        extension = 'docx';
+      }
+      console.log(`Creating blob with MIME type: ${mimeType}`);
       const blob = new Blob([formattedContent], {
         type: mimeType
       });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${document.name}.${extension}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Use a simpler and more reliable download method
+      const filename = `${document.name}.${extension}`;
+      try {
+        // Create URL and download link
+        const url = window.URL.createObjectURL(blob);
+        const downloadLink = window.document.createElement('a');
+        // Configure the download link
+        downloadLink.href = url;
+        downloadLink.download = filename;
+        downloadLink.style.display = 'none';
+        // Add to DOM, trigger click, and clean up
+        window.document.body.appendChild(downloadLink);
+        console.log('Download link created and appended to document');
+        downloadLink.click();
+        console.log('Download click triggered');
+        // Clean up
+        window.setTimeout(() => {
+          window.document.body.removeChild(downloadLink);
+          window.URL.revokeObjectURL(url);
+          console.log('Download resources cleaned up');
+        }, 1000);
+      } catch (err) {
+        console.error('Error during download link creation:', err);
+        alert(`Download failed: ${err instanceof Error ? err.message : 'Error creating download link'}`);
+      }
     } catch (error) {
-      console.error('Error downloading document:', error);
+      console.error('Download failed with error:', error);
+      alert(`Download failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }, [documents]);
   // Rename a document
