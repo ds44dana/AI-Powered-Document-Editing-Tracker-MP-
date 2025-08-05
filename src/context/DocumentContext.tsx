@@ -319,7 +319,7 @@ export const DocumentProvider: React.FC<{
     }
   }, [currentDocument]);
   // Update multiple sentences at once
-  const updateMultipleSentences = useCallback((text: string) => {
+  const updateMultipleSentences = useCallback(async (text: string) => {
     if (!currentDocument) return;
     // Add current state to history before making changes
     addToHistory(currentDocument);
@@ -334,24 +334,51 @@ export const DocumentProvider: React.FC<{
     // Create an automatic snapshot for bulk edit
     const documentWithSnapshot = createSnapshot(updatedDocument, 'auto', 'Bulk edit');
     setCurrentDocument(documentWithSnapshot);
-    // Automatically generate suggestions for the new sentences
-    setTimeout(() => {
-      if (documentWithSnapshot) {
-        const updatedSentences = documentWithSnapshot.sentences.map(sentence => {
-          const suggestion = generatePlaceholderSuggestion(sentence.text);
-          return {
+    setIsSaving(true);
+    // Generate suggestions for the new sentences using our API
+    try {
+      const updatedSentences = [...documentWithSnapshot.sentences];
+      for (let i = 0; i < updatedSentences.length; i++) {
+        const sentence = updatedSentences[i];
+        try {
+          // Call our server-side API instead of OpenAI directly
+          const suggestion = await generateSuggestion(sentence.text);
+          // Update the sentence with the new suggestion
+          updatedSentences[i] = {
             ...sentence,
-            suggestion
+            suggestion: suggestion
           };
-        });
-        const docWithSuggestions = {
-          ...documentWithSnapshot,
-          sentences: updatedSentences
-        };
-        setCurrentDocument(docWithSuggestions);
-        scheduleAutosave();
+        } catch (error) {
+          console.error(`Error generating suggestion for sentence ${i}:`, error);
+          // If API call fails, fall back to the placeholder suggestion
+          updatedSentences[i] = {
+            ...sentence,
+            suggestion: generatePlaceholderSuggestion(sentence.text)
+          };
+        }
       }
-    }, 300);
+      const docWithSuggestions = {
+        ...documentWithSnapshot,
+        sentences: updatedSentences
+      };
+      setCurrentDocument(docWithSuggestions);
+      scheduleAutosave();
+    } catch (error) {
+      console.error('Error generating suggestions:', error);
+      // Fall back to placeholder suggestions
+      const fallbackSentences = documentWithSnapshot.sentences.map(sentence => ({
+        ...sentence,
+        suggestion: generatePlaceholderSuggestion(sentence.text)
+      }));
+      const fallbackDocument = {
+        ...documentWithSnapshot,
+        sentences: fallbackSentences
+      };
+      setCurrentDocument(fallbackDocument);
+      scheduleAutosave();
+    } finally {
+      setIsSaving(false);
+    }
   }, [currentDocument, addToHistory, scheduleAutosave, createSnapshot]);
   // Generate suggestions for sentences
   const generateSuggestions = useCallback(() => {
