@@ -38,7 +38,7 @@ const EditorToolbar = ({
               Generate Suggestions
             </button>
             {tooltipVisible === 'generate' && <div className="absolute z-10 w-60 px-3 py-2 mt-1 text-sm font-medium text-white bg-gray-900 rounded-md shadow-sm">
-                Generate AI-powered suggestions for your entire document
+                Generate AI-powered suggestions via secure API
               </div>}
           </div>
           <div className="relative">

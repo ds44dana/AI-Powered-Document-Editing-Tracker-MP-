@@ -42,6 +42,7 @@ type DocumentContextType = {
   rejectSuggestion: (sentenceId: string) => void;
   createNewDocument: (name: string, text?: string) => void;
   generateSuggestions: () => void;
+  regenerateSingleSuggestion: (sentenceId: string) => void;
   updateMultipleSentences: (text: string) => void;
   undo: () => void;
   redo: () => void;
@@ -381,25 +382,107 @@ export const DocumentProvider: React.FC<{
     }
   }, [currentDocument, addToHistory, scheduleAutosave, createSnapshot]);
   // Generate suggestions for sentences
-  const generateSuggestions = useCallback(() => {
+  const generateSuggestions = useCallback(async () => {
     if (!currentDocument) return;
     // Add current state to history before making changes
     addToHistory(currentDocument);
-    const updatedSentences = currentDocument.sentences.map(sentence => {
-      // This is a placeholder for LLM-generated suggestions
-      const suggestion = generatePlaceholderSuggestion(sentence.text);
-      return {
-        ...sentence,
-        suggestion
+    // Show saving indicator
+    setIsSaving(true);
+    try {
+      // Process each sentence and generate suggestions via API
+      const updatedSentences = [...currentDocument.sentences];
+      for (let i = 0; i < updatedSentences.length; i++) {
+        const sentence = updatedSentences[i];
+        try {
+          // Call our server-side API instead of using placeholder
+          const suggestion = await generateSuggestion(sentence.text);
+          // Update the sentence with the new suggestion
+          updatedSentences[i] = {
+            ...sentence,
+            suggestion: suggestion
+          };
+        } catch (error) {
+          console.error(`Error generating suggestion for sentence ${i}:`, error);
+          // If API call fails, fall back to the placeholder suggestion
+          updatedSentences[i] = {
+            ...sentence,
+            suggestion: generatePlaceholderSuggestion(sentence.text)
+          };
+        }
+      }
+      const updatedDocument = {
+        ...currentDocument,
+        sentences: updatedSentences,
+        lastModified: new Date()
       };
-    });
-    const updatedDocument = {
-      ...currentDocument,
-      sentences: updatedSentences,
-      lastModified: new Date()
-    };
-    setCurrentDocument(updatedDocument);
-    scheduleAutosave();
+      setCurrentDocument(updatedDocument);
+      scheduleAutosave();
+    } catch (error) {
+      console.error('Error generating suggestions:', error);
+      // Fall back to placeholder suggestions if the overall process fails
+      const fallbackSentences = currentDocument.sentences.map(sentence => ({
+        ...sentence,
+        suggestion: generatePlaceholderSuggestion(sentence.text)
+      }));
+      const fallbackDocument = {
+        ...currentDocument,
+        sentences: fallbackSentences,
+        lastModified: new Date()
+      };
+      setCurrentDocument(fallbackDocument);
+      scheduleAutosave();
+    } finally {
+      setIsSaving(false);
+    }
+  }, [currentDocument, addToHistory, scheduleAutosave]);
+  // Regenerate a suggestion for a single sentence
+  const regenerateSingleSuggestion = useCallback(async (sentenceId: string) => {
+    if (!currentDocument) return;
+    // Find the sentence by ID
+    const sentenceIndex = currentDocument.sentences.findIndex(s => s.id === sentenceId);
+    if (sentenceIndex === -1) return;
+    // Add current state to history before making changes
+    addToHistory(currentDocument);
+    // Show saving indicator for this specific operation
+    setIsSaving(true);
+    try {
+      const updatedSentences = [...currentDocument.sentences];
+      const sentence = updatedSentences[sentenceIndex];
+      try {
+        // Call our secure server-side API to generate a new suggestion
+        const suggestion = await generateSuggestion(sentence.text);
+        // Update only this specific sentence
+        updatedSentences[sentenceIndex] = {
+          ...sentence,
+          suggestion: suggestion
+        };
+        const updatedDocument = {
+          ...currentDocument,
+          sentences: updatedSentences,
+          lastModified: new Date()
+        };
+        setCurrentDocument(updatedDocument);
+        scheduleAutosave();
+      } catch (error) {
+        console.error(`Error regenerating suggestion for sentence: ${sentenceId}`, error);
+        // If API call fails, fall back to the placeholder suggestion
+        updatedSentences[sentenceIndex] = {
+          ...sentence,
+          suggestion: generatePlaceholderSuggestion(sentence.text)
+        };
+        const fallbackDocument = {
+          ...currentDocument,
+          sentences: updatedSentences,
+          lastModified: new Date()
+        };
+        setCurrentDocument(fallbackDocument);
+        scheduleAutosave();
+      }
+    } catch (error) {
+      console.error('Error during single suggestion regeneration:', error);
+    } finally {
+      setIsSaving(false);
+    }
   }, [currentDocument, addToHistory, scheduleAutosave]);
   // Undo the last action
   const undo = useCallback(() => {
@@ -574,177 +657,91 @@ export const DocumentProvider: React.FC<{
     scheduleAutosave();
   }, [currentDocument, addToHistory, scheduleAutosave]);
   // Run fact check
-  const runFactCheck = useCallback(() => {
+  const runFactCheck = useCallback(async () => {
     if (!currentDocument) return;
     // Add current state to history before making changes
     addToHistory(currentDocument);
-    // In a real app, this would connect to an external database or LLM
-    // Here, we'll simulate fact checking with some common patterns
-    const factChecks = [{
-      pattern: /founded in (\d{4})/i,
-      check: (year: string) => parseInt(year) < 2023
-    }, {
-      pattern: /(\d+)% growth/i,
-      check: (percent: string) => parseInt(percent) <= 100
-    }, {
-      pattern: /largest (.*) in the world/i,
-      check: () => false
-    }, {
-      pattern: /over (\d+) million/i,
-      check: (num: string) => parseInt(num) < 1000
-    }, {
-      pattern: /discovered in (\d{4})/i,
-      check: (year: string) => parseInt(year) < 2023
-    }];
-    const updatedSentences = currentDocument.sentences.map(sentence => {
-      let suggestion = sentence.text;
-      let hasChange = false;
-      // Check for factual claims
-      for (const {
-        pattern,
-        check
-      } of factChecks) {
-        const match = sentence.text.match(pattern);
-        if (match) {
-          const claim = match[1];
-          const isValid = check(claim);
-          if (!isValid) {
-            suggestion = `${sentence.text} (Consider verifying: "${match[0]}")`;
-            hasChange = true;
-          }
+    // Show saving indicator
+    setIsSaving(true);
+    try {
+      const updatedSentences = [...currentDocument.sentences];
+      // Process each sentence through the AI for fact checking
+      for (let i = 0; i < updatedSentences.length; i++) {
+        const sentence = updatedSentences[i];
+        try {
+          // Use our secure server-side API to perform fact checking
+          const systemPrompt = "You are a fact-checking assistant. Analyze the provided sentence for factual claims. If you find a claim that might need verification, add '(Consider verifying: [specific claim])' at the end. If you find vague claims that need citation, add '(Consider adding specific citation for this claim)'. If the sentence contains no factual claims or all claims appear reasonable, return the original sentence unchanged.";
+          const suggestion = await generateSuggestion(sentence.text, systemPrompt);
+          // Only update if the AI actually suggested a change
+          updatedSentences[i] = {
+            ...sentence,
+            suggestion: suggestion !== sentence.text ? suggestion : sentence.suggestion
+          };
+        } catch (error) {
+          console.error(`Error fact checking sentence ${i}:`, error);
+          // If API call fails, keep the existing suggestion
+          // No change needed here as we're keeping the original object
         }
       }
-      // Check for specific claims that would need verification
-      if (sentence.text.includes('studies show') || sentence.text.includes('research indicates') || sentence.text.includes('experts agree')) {
-        suggestion = `${sentence.text} (Consider adding specific citation for this claim)`;
-        hasChange = true;
-      }
-      // If no fact issues found, return original
-      return {
-        ...sentence,
-        suggestion: hasChange ? suggestion : sentence.suggestion
+      const updatedDocument = {
+        ...currentDocument,
+        sentences: updatedSentences,
+        lastModified: new Date()
       };
-    });
-    const updatedDocument = {
-      ...currentDocument,
-      sentences: updatedSentences,
-      lastModified: new Date()
-    };
-    setCurrentDocument(updatedDocument);
-    scheduleAutosave();
+      setCurrentDocument(updatedDocument);
+      scheduleAutosave();
+    } catch (error) {
+      console.error('Error during fact check:', error);
+    } finally {
+      setIsSaving(false);
+    }
   }, [currentDocument, addToHistory, scheduleAutosave]);
   // Run style check
-  const runStyleCheck = useCallback((style: string = 'professional') => {
+  const runStyleCheck = useCallback(async (style: string = 'professional') => {
     if (!currentDocument) return;
     // Add current state to history before making changes
     addToHistory(currentDocument);
-    const styleRules: Record<string, Array<{
-      pattern: RegExp;
-      replacement: string;
-      reason: string;
-    }>> = {
-      professional: [{
-        pattern: /very|really|actually|basically/gi,
-        replacement: '',
-        reason: 'Remove filler words for clarity'
-      }, {
-        pattern: /we think|we believe|in my opinion/gi,
-        replacement: 'Analysis indicates',
-        reason: 'Use more authoritative phrasing'
-      }, {
-        pattern: /can't|won't|don't/gi,
-        replacement: 'cannot|will not|do not',
-        reason: 'Avoid contractions in formal writing'
-      }, {
-        pattern: /good/gi,
-        replacement: 'beneficial',
-        reason: 'Use more precise terminology'
-      }, {
-        pattern: /bad/gi,
-        replacement: 'suboptimal',
-        reason: 'Use more precise terminology'
-      }],
-      academic: [{
-        pattern: /I |we |our /gi,
-        replacement: 'This study ',
-        reason: 'Use passive voice for academic writing'
-      }, {
-        pattern: /shows/gi,
-        replacement: 'demonstrates',
-        reason: 'Use scholarly terminology'
-      }, {
-        pattern: /found/gi,
-        replacement: 'observed',
-        reason: 'Use scholarly terminology'
-      }, {
-        pattern: /looks like/gi,
-        replacement: 'suggests',
-        reason: 'Use scholarly terminology'
-      }],
-      casual: [{
-        pattern: /therefore|thus|hence/gi,
-        replacement: 'so',
-        reason: 'Use simpler connecting words'
-      }, {
-        pattern: /utilize/gi,
-        replacement: 'use',
-        reason: 'Use simpler terminology'
-      }, {
-        pattern: /implement/gi,
-        replacement: 'do',
-        reason: 'Use simpler terminology'
-      }, {
-        pattern: /regarding/gi,
-        replacement: 'about',
-        reason: 'Use simpler terminology'
-      }]
-    };
-    const selectedRules = styleRules[style] || styleRules.professional;
-    const updatedSentences = currentDocument.sentences.map(sentence => {
-      let suggestion = sentence.text;
-      let hasChange = false;
-      let reason = '';
-      // Apply style rules
-      for (const rule of selectedRules) {
-        if (rule.pattern.test(sentence.text)) {
-          suggestion = sentence.text.replace(rule.pattern, rule.replacement);
-          hasChange = true;
-          reason = rule.reason;
-          break;
+    // Show saving indicator
+    setIsSaving(true);
+    try {
+      const updatedSentences = [...currentDocument.sentences];
+      // Process each sentence through the AI for style checking
+      for (let i = 0; i < updatedSentences.length; i++) {
+        const sentence = updatedSentences[i];
+        try {
+          // Use our secure server-side API to perform style checking
+          let systemPrompt = 'You are a writing assistant. Rewrite the provided sentence to improve it.';
+          // Customize the system prompt based on the selected style
+          if (style === 'professional') {
+            systemPrompt = 'You are a professional writing assistant. Rewrite the provided sentence to make it more formal, clear, and business-appropriate. Use precise terminology, avoid contractions, remove filler words, and ensure the tone is authoritative yet respectful. Only respond with the improved sentence, no explanations.';
+          } else if (style === 'academic') {
+            systemPrompt = 'You are an academic writing assistant. Rewrite the provided sentence to make it suitable for scholarly publications. Use passive voice where appropriate, employ scholarly terminology, maintain a formal tone, and ensure precise language. Only respond with the improved sentence, no explanations.';
+          } else if (style === 'casual') {
+            systemPrompt = 'You are a casual writing assistant. Rewrite the provided sentence to make it more conversational and approachable. Use simpler terminology, contractions, and a friendly tone. Keep sentences shorter and more direct. Only respond with the improved sentence, no explanations.';
+          }
+          const suggestion = await generateSuggestion(sentence.text, systemPrompt);
+          // Only update if the AI actually suggested a change
+          updatedSentences[i] = {
+            ...sentence,
+            suggestion: suggestion !== sentence.text ? suggestion : sentence.suggestion
+          };
+        } catch (error) {
+          console.error(`Error style checking sentence ${i}:`, error);
+          // If API call fails, keep the existing suggestion
         }
       }
-      // Check for sentence length (long sentences in professional/academic, short in casual)
-      const words = sentence.text.split(/\s+/);
-      if (style === 'professional' || style === 'academic') {
-        if (words.length > 25) {
-          const midpoint = Math.floor(words.length / 2);
-          suggestion = `${words.slice(0, midpoint).join(' ')}. ${words.slice(midpoint).join(' ')}`;
-          hasChange = true;
-          reason = 'Break long sentences for readability';
-        }
-      } else if (style === 'casual' && words.length > 15) {
-        const midpoint = Math.floor(words.length / 2);
-        suggestion = `${words.slice(0, midpoint).join(' ')}. ${words.slice(midpoint).join(' ')}`;
-        hasChange = true;
-        reason = 'Use shorter sentences for casual tone';
-      }
-      // Add reason if changed
-      if (hasChange && reason) {
-        suggestion += ` (${reason})`;
-      }
-      // If no style issues found, return original
-      return {
-        ...sentence,
-        suggestion: hasChange ? suggestion : sentence.suggestion
+      const updatedDocument = {
+        ...currentDocument,
+        sentences: updatedSentences,
+        lastModified: new Date()
       };
-    });
-    const updatedDocument = {
-      ...currentDocument,
-      sentences: updatedSentences,
-      lastModified: new Date()
-    };
-    setCurrentDocument(updatedDocument);
-    scheduleAutosave();
+      setCurrentDocument(updatedDocument);
+      scheduleAutosave();
+    } catch (error) {
+      console.error('Error during style check:', error);
+    } finally {
+      setIsSaving(false);
+    }
   }, [currentDocument, addToHistory, scheduleAutosave]);
   // Split and align sentences
   const splitAndAlignSentences = useCallback(() => {
@@ -1013,6 +1010,7 @@ export const DocumentProvider: React.FC<{
     rejectSuggestion,
     createNewDocument,
     generateSuggestions,
+    regenerateSingleSuggestion,
     updateMultipleSentences,
     undo,
     redo,

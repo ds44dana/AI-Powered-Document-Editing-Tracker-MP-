@@ -10,6 +10,7 @@ const EditorPage = () => {
     acceptSuggestion,
     rejectSuggestion,
     generateSuggestions,
+    regenerateSingleSuggestion,
     updateMultipleSentences,
     undo,
     redo,
@@ -117,10 +118,9 @@ const EditorPage = () => {
   };
   // Regenerate a specific sentence suggestion
   const handleRegenerateSentence = (sentenceId: string) => {
-    // In a real app, this would call an API to regenerate just this sentence
     console.log(`Regenerating suggestion for sentence ${sentenceId}`);
-    // For now, we'll just regenerate all suggestions
-    generateSuggestions();
+    // Call our new function to regenerate just this specific sentence
+    regenerateSingleSuggestion(sentenceId);
   };
   // Handle save version
   const handleSaveVersion = () => {

@@ -9,7 +9,7 @@ const Header = () => {
           <div className="flex items-center space-x-1">
             <FileTextIcon className="h-6 w-6 text-blue-600" />
             <span className="text-xl font-semibold text-gray-800">
-              2LLM-Doc Editor
+              PaperTrack
             </span>
           </div>
           <nav className="flex space-x-6">

@@ -7,12 +7,11 @@ const HomePage = () => {
       <div className="container mx-auto px-4 py-16">
         <div className="max-w-4xl mx-auto text-center">
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
-            Sentence-Level Intelligence for Document Editing
+            Track, align, and elevate every sentence with AI
           </h1>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto mb-8">
-            Experience unprecedented control with our dual-panel AI editor that
-            gives you complete oversight of every sentence-level change in your
-            documents.
+            Experience unprecedented control with our Sentence-Level dual-panel
+            AI editor that gives you complete oversight of document editing.
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-4 mb-12">
             <Link to="/editor" className="px-6 py-3 bg-blue-600 text-white text-lg font-medium rounded-md hover:bg-blue-700 transition shadow-md flex items-center justify-center">
