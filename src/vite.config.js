@@ -6,17 +6,12 @@ export default defineConfig({
   build: {
     rollupOptions: {
       // External packages that shouldn't be bundled
-      external: [
-        // Add any packages that cause issues during build
-      ]
+      external: ['mammoth', 'tesseract.js', 'pdfjs-dist/build/pdf.worker.min.js']
     }
   },
   // Add resolve options to help with problematic imports
   resolve: {
-    dedupe: ['react', 'react-dom'],
-    alias: {
-      // Add any aliases if needed
-    }
+    dedupe: ['react', 'react-dom']
   },
   // Optimize dependencies
   optimizeDeps: {
@@ -28,5 +23,9 @@ export default defineConfig({
     logOverride: {
       'this-is-undefined-in-esm': 'silent'
     }
+  },
+  // For PDF.js worker setup
+  worker: {
+    format: 'es'
   }
 });
