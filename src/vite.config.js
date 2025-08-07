@@ -7,8 +7,19 @@ export default defineConfig({
     rollupOptions: {
       // External packages that shouldn't be bundled
       external: [
-        // Add any packages here that cause issues during build
+        // Add any packages that cause issues during build
       ]
     }
+  },
+  // Add resolve options to help with problematic imports
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+    alias: {
+      // Add any aliases if needed
+    }
+  },
+  // Optimize dependencies
+  optimizeDeps: {
+    include: ['jszip', 'mammoth', 'pdfjs-dist']
   }
 });

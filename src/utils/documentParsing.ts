@@ -1,6 +1,6 @@
 // Import JSZip statically instead of dynamically
 import JSZip from 'jszip';
-// Initialize mammoth as null, we'll try to load it dynamically
+// Make mammoth a dynamic import like the other libraries
 let mammoth: any = null;
 // Other libraries can still be dynamically imported if needed
 let Tesseract: any = null;
@@ -12,6 +12,8 @@ try {
   pdfjs = require('pdfjs-dist');
   // Set worker path for pdf.js (if available)
   if (pdfjs && pdfjs.GlobalWorkerOptions) {
+    // Add the vite-ignore comment to prevent build warnings
+    /* @vite-ignore */
     const pdfjsWorker = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url);
     pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker.toString();
   }
@@ -256,7 +258,7 @@ export async function parseDocx(file: File): Promise<ParseResult> {
         }
       };
     }
-    // APPROACH 1: Try to use mammoth for extraction if available
+    // APPROACH 1: Use mammoth for extraction (now dynamically loaded)
     let mammothResult = null;
     try {
       // Try to dynamically load mammoth if not already loaded
@@ -268,8 +270,9 @@ export async function parseDocx(file: File): Promise<ParseResult> {
           // We'll continue with the fallback method
         }
       }
-      // Only attempt mammoth extraction if the library was loaded
+      // Only attempt mammoth extraction if the library was successfully loaded
       if (mammoth) {
+        // Attempt to use mammoth for extraction
         console.log('Attempting extraction with mammoth...');
         const result = await mammoth.extractRawText({
           arrayBuffer
@@ -291,7 +294,7 @@ export async function parseDocx(file: File): Promise<ParseResult> {
           console.log('Mammoth returned empty text without error');
         }
       } else {
-        console.log('Mammoth library not available, skipping to fallback method');
+        console.log('Mammoth library not available, skipping this extraction method');
       }
     } catch (mammothError) {
       console.error('Error in mammoth.js processing:', mammothError);
