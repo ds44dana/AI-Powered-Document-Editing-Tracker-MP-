@@ -12,7 +12,8 @@ try {
   pdfjs = require('pdfjs-dist');
   // Set worker path for pdf.js (if available)
   if (pdfjs && pdfjs.GlobalWorkerOptions) {
-    // Add the vite-ignore comment to prevent build warnings
+    // The @vite-ignore comment needs to be directly before the new URL line
+    // with no other code or comments between them
     /* @vite-ignore */
     const pdfjsWorker = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url);
     pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker.toString();
@@ -264,10 +265,16 @@ export async function parseDocx(file: File): Promise<ParseResult> {
       // Try to dynamically load mammoth if not already loaded
       if (!mammoth) {
         try {
-          mammoth = await import('mammoth');
+          // Use a more explicit dynamic import pattern that Vite can handle better
+          /* @vite-ignore */
+          mammoth = await import('mammoth').catch(e => {
+            console.warn('Failed to load mammoth.js:', e.message);
+            return null;
+          });
         } catch (e) {
           console.warn('mammoth.js library not available:', e.message);
           // We'll continue with the fallback method
+          mammoth = null;
         }
       }
       // Only attempt mammoth extraction if the library was successfully loaded
@@ -557,9 +564,15 @@ export async function runOcr(file: File, options: ParseOptions = {}): Promise<Pa
     // Try to dynamically load Tesseract if not already loaded
     if (!Tesseract) {
       try {
-        Tesseract = await import('tesseract.js');
+        // Use a more explicit dynamic import pattern that Vite can handle better
+        /* @vite-ignore */
+        Tesseract = await import('tesseract.js').catch(e => {
+          console.warn('Failed to load tesseract.js:', e.message);
+          return null;
+        });
       } catch (e) {
         console.warn('tesseract.js library not available:', e.message);
+        Tesseract = null;
         return {
           text: '',
           score: 0,

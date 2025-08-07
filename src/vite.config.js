@@ -20,6 +20,13 @@ export default defineConfig({
   },
   // Optimize dependencies
   optimizeDeps: {
-    include: ['jszip', 'mammoth', 'pdfjs-dist']
+    include: ['jszip'],
+    exclude: ['mammoth', 'tesseract.js', 'pdfjs-dist'] // Exclude problematic packages from optimization
+  },
+  // Make Vite less strict about dynamic imports
+  esbuild: {
+    logOverride: {
+      'this-is-undefined-in-esm': 'silent'
+    }
   }
 });
