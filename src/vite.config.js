@@ -6,7 +6,9 @@ export default defineConfig({
   build: {
     rollupOptions: {
       // External packages that shouldn't be bundled
-      external: ['mammoth', 'tesseract.js', 'pdfjs-dist/build/pdf.worker.min.js']
+      external: ['mammoth', 'tesseract.js'
+      // Removed the problematic pdfjs-dist/build/pdf.worker.min.js reference
+      ]
     }
   },
   // Add resolve options to help with problematic imports
@@ -16,7 +18,7 @@ export default defineConfig({
   // Optimize dependencies
   optimizeDeps: {
     include: ['jszip'],
-    exclude: ['mammoth', 'tesseract.js', 'pdfjs-dist'] // Exclude problematic packages from optimization
+    exclude: ['mammoth', 'tesseract.js'] // Removed pdfjs-dist from exclusions
   },
   // Make Vite less strict about dynamic imports
   esbuild: {
