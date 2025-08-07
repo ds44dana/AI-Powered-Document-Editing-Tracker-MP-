@@ -1,8 +1,10 @@
-// Use optional dynamic imports for libraries that might not be available
+// Import JSZip statically instead of dynamically
+import JSZip from 'jszip';
+// Initialize mammoth as null, we'll try to load it dynamically
 let mammoth: any = null;
+// Other libraries can still be dynamically imported if needed
 let Tesseract: any = null;
 let pdfjs: any = null;
-let JSZip: any = null;
 
 // Try to load pdfjs-dist
 try {
@@ -132,20 +134,11 @@ export function hasValidDocxSignature(buffer: ArrayBuffer): boolean {
  */
 export async function extractDocxWithoutMammoth(buffer: ArrayBuffer): Promise<string> {
   try {
-    // Dynamically import JSZip if not already loaded
-    if (!JSZip) {
-      try {
-        JSZip = (await import('jszip')).default;
-      } catch (e) {
-        console.error('JSZip library not available:', e.message);
-        throw new Error('JSZip library is required for DOCX fallback extraction');
-      }
-    }
     // Quick signature check
     if (!hasValidDocxSignature(buffer)) {
       throw new Error('Not a valid DOCX/ZIP container');
     }
-    // Load the ZIP file
+    // Load the ZIP file - now using the statically imported JSZip
     const zip = new JSZip();
     const zipFile = await zip.loadAsync(buffer);
     // Get the main document content
@@ -263,20 +256,20 @@ export async function parseDocx(file: File): Promise<ParseResult> {
         }
       };
     }
-    // APPROACH 1: Try to use mammoth if available
+    // APPROACH 1: Try to use mammoth for extraction if available
     let mammothResult = null;
     try {
       // Try to dynamically load mammoth if not already loaded
       if (!mammoth) {
         try {
           mammoth = await import('mammoth');
-          console.log('Mammoth library loaded successfully');
         } catch (e) {
-          console.warn('mammoth library not available:', e.message);
+          console.warn('mammoth.js library not available:', e.message);
+          // We'll continue with the fallback method
         }
       }
+      // Only attempt mammoth extraction if the library was loaded
       if (mammoth) {
-        // Attempt to use mammoth for extraction
         console.log('Attempting extraction with mammoth...');
         const result = await mammoth.extractRawText({
           arrayBuffer
@@ -297,6 +290,8 @@ export async function parseDocx(file: File): Promise<ParseResult> {
         } else {
           console.log('Mammoth returned empty text without error');
         }
+      } else {
+        console.log('Mammoth library not available, skipping to fallback method');
       }
     } catch (mammothError) {
       console.error('Error in mammoth.js processing:', mammothError);

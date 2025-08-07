@@ -14,7 +14,10 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
     "lucide-react": "^0.441.0",
-    "openai": "^4.61.1"
+    "openai": "^4.61.1",
+    "jszip": "latest",
+    "vite": "latest",
+    "@vitejs/plugin-react": "latest"
   },
   "devDependencies": {
     "@types/node": "^20.11.18",
