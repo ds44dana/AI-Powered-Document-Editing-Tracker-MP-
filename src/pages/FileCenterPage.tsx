@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDocument } from '../context/DocumentContext';
 import { FileTextIcon, PlusIcon, TrashIcon, EditIcon, UploadIcon, DownloadIcon, CopyIcon, CheckIcon, XIcon, HistoryIcon, ClockIcon, CloudIcon, RotateCcwIcon } from 'lucide-react';
+import { getQualityDescription } from '../utils/documentParsing';
 const FileCenterPage = () => {
   const {
     documents,
@@ -21,9 +22,23 @@ const FileCenterPage = () => {
   const [renamingDocId, setRenamingDocId] = useState<string | null>(null);
   const [newDocName, setNewDocName] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadErrorDetails, setUploadErrorDetails] = useState<{
+    code?: string;
+    actionable?: boolean;
+    suggestedAction?: string;
+  } | null>(null);
   const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
   const [viewingVersionsDocId, setViewingVersionsDocId] = useState<string | null>(null);
   const [confirmRollbackVersionId, setConfirmRollbackVersionId] = useState<string | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<{
+    isUploading: boolean;
+    progress: number;
+    quality?: number;
+    source?: string;
+  }>({
+    isUploading: false,
+    progress: 0
+  });
   const handleCreateNew = () => {
     const name = `New Document ${documents.length + 1}`;
     createNewDocument(name);
@@ -56,11 +71,87 @@ const FileCenterPage = () => {
     if (!files || files.length === 0) return;
     const file = files[0];
     setUploadError(null);
+    setUploadErrorDetails(null);
+    setUploadStatus({
+      isUploading: true,
+      progress: 10
+    });
     try {
-      await uploadDocument(file);
+      // Log file details for debugging
+      console.log(`[upload] File: ${file.name}, type: ${file.type}, size: ${file.size} bytes`);
+      // Simulate progress updates
+      const progressInterval = setInterval(() => {
+        setUploadStatus(prev => ({
+          ...prev,
+          progress: Math.min(prev.progress + 10, 90)
+        }));
+      }, 500);
+      const result = await uploadDocument(file);
+      clearInterval(progressInterval);
+      setUploadStatus({
+        isUploading: false,
+        progress: 100,
+        quality: result.quality,
+        source: result.source
+      });
       navigate('/editor');
     } catch (error) {
-      setUploadError((error as Error).message);
+      const errorMessage = (error as Error).message;
+      setUploadError(errorMessage);
+      // Try to extract error code and actionable status from more specific error types
+      if (errorMessage.includes('PDF is password-protected') || errorMessage.includes('password protection')) {
+        setUploadErrorDetails({
+          code: 'PDF_ENCRYPTED',
+          actionable: true,
+          suggestedAction: 'Upload an unprotected version of this document'
+        });
+      } else if (errorMessage.includes('no text layer')) {
+        setUploadErrorDetails({
+          code: 'PDF_NO_TEXT_LAYER',
+          actionable: true,
+          suggestedAction: 'Process with OCR'
+        });
+      } else if (errorMessage.includes('Legacy .doc format')) {
+        setUploadErrorDetails({
+          code: 'LEGACY_DOC_FORMAT',
+          actionable: true,
+          suggestedAction: 'Convert to .docx and try again'
+        });
+      } else if (errorMessage.includes('corrupted') && errorMessage.includes('Office document')) {
+        setUploadErrorDetails({
+          code: 'DOCX_NOT_VALID_ZIP',
+          actionable: true,
+          suggestedAction: 'Resave document in Word and try again'
+        });
+      } else if (errorMessage.includes('password-protected') && (errorMessage.includes('document') || errorMessage.includes('Word'))) {
+        setUploadErrorDetails({
+          code: 'DOCX_PASSWORD_PROTECTED',
+          actionable: true,
+          suggestedAction: 'Remove password protection and try again'
+        });
+      } else if (errorMessage.includes('Unsupported file format')) {
+        setUploadErrorDetails({
+          code: 'UNSUPPORTED_FORMAT',
+          actionable: true,
+          suggestedAction: 'Upload a supported file format'
+        });
+      } else if (errorMessage.includes('images, shapes, or text in unsupported elements')) {
+        setUploadErrorDetails({
+          code: 'DOCX_COMPLEX_CONTENT',
+          actionable: true,
+          suggestedAction: 'Save as PDF and try uploading again'
+        });
+      } else if (errorMessage.includes('No text could be extracted')) {
+        setUploadErrorDetails({
+          code: 'NO_TEXT_EXTRACTED',
+          actionable: true,
+          suggestedAction: 'Try saving as PDF and uploading again'
+        });
+      }
+      setUploadStatus({
+        isUploading: false,
+        progress: 0
+      });
     } finally {
       // Reset the file input
       if (fileInputRef.current) {
@@ -129,11 +220,58 @@ const FileCenterPage = () => {
         </div>
       </div>
 
-      {uploadError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6 flex items-center justify-between">
-          <span>{uploadError}</span>
-          <button onClick={() => setUploadError(null)} className="text-red-500">
-            <TrashIcon className="h-4 w-4" />
-          </button>
+      {uploadStatus.isUploading && <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded mb-6">
+          <div className="flex items-center justify-between mb-1">
+            <span>Processing document...</span>
+            <span>{uploadStatus.progress}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2.5">
+            <div className="bg-blue-600 h-2.5 rounded-full" style={{
+          width: `${uploadStatus.progress}%`
+        }}></div>
+          </div>
+        </div>}
+
+      {uploadError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">{uploadError}</p>
+              {uploadErrorDetails?.actionable && <p className="text-sm mt-1">
+                  <span className="font-medium">Suggestion:</span>{' '}
+                  {uploadErrorDetails.suggestedAction}
+                </p>}
+              {uploadErrorDetails?.code === 'LEGACY_DOC_FORMAT' && <p className="text-sm mt-2">
+                  To convert a .doc file to .docx: Open the file in Microsoft
+                  Word, then use "Save As" and select the .docx format.
+                </p>}
+              {uploadErrorDetails?.code === 'DOCX_PASSWORD_PROTECTED' && <p className="text-sm mt-2">
+                  To remove password protection: Open the document in Word, go
+                  to "File" → "Info" → "Protect Document" → "Encrypt with
+                  Password" and remove the password.
+                </p>}
+              {uploadErrorDetails?.code === 'DOCX_NOT_VALID_ZIP' && <p className="text-sm mt-2">
+                  Word documents (.docx) are ZIP archives containing XML files.
+                  Your file appears to be corrupted. Try opening and resaving it
+                  in Word.
+                </p>}
+              {uploadErrorDetails?.code === 'DOCX_COMPLEX_CONTENT' && <p className="text-sm mt-2">
+                  This document may contain text in shapes, textboxes, or other
+                  complex elements that can't be extracted directly. Saving as
+                  PDF often preserves this text in a more accessible format.
+                </p>}
+              {uploadErrorDetails?.code === 'NO_TEXT_EXTRACTED' && <p className="text-sm mt-2">
+                  Check if your document contains actual text content (not just
+                  images or scanned pages). If it's a scanned document, try
+                  using a PDF with OCR processing.
+                </p>}
+            </div>
+            <button onClick={() => {
+          setUploadError(null);
+          setUploadErrorDetails(null);
+        }} className="text-red-500">
+              <XIcon className="h-4 w-4" />
+            </button>
+          </div>
         </div>}
 
       {/* Delete confirmation modal */}
@@ -277,10 +415,10 @@ const FileCenterPage = () => {
           </div>
         </div> : <div className="bg-white rounded-lg shadow-md border border-gray-200">
           <div className="grid grid-cols-12 text-sm font-medium text-gray-500 border-b border-gray-200 px-6 py-3">
-            <div className="col-span-5">Name</div>
+            <div className="col-span-4">Name</div>
             <div className="col-span-2">Last Modified</div>
             <div className="col-span-2">Version</div>
-            <div className="col-span-1">Status</div>
+            <div className="col-span-2">Extraction Quality</div>
             <div className="col-span-2">Actions</div>
           </div>
           {documents.map(doc => <div key={doc.id} className="grid grid-cols-12 items-center px-6 py-4 border-b border-gray-200 hover:bg-gray-50 transition">
@@ -311,11 +449,14 @@ const FileCenterPage = () => {
                     <HistoryIcon className="h-4 w-4" />
                   </button>}
               </div>
-              <div className="col-span-1">
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                  <CloudIcon className="h-3 w-3 mr-1" />
-                  Saved
-                </span>
+              <div className="col-span-2">
+                {doc.extractionQuality !== undefined ? <div className="flex items-center">
+                    <div className={`w-2 h-2 rounded-full mr-2 ${doc.extractionQuality >= 0.75 ? 'bg-green-500' : doc.extractionQuality >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
+                    <span className="text-sm">
+                      {getQualityDescription(doc.extractionQuality)}
+                      {doc.extractionSource && ` (${doc.extractionSource})`}
+                    </span>
+                  </div> : <span className="text-gray-400">Not available</span>}
               </div>
               <div className="col-span-2 flex space-x-1">
                 <button className="p-1 text-gray-500 hover:text-blue-600 transition" title="Edit document" onClick={() => handleOpenDocument(doc.id)}>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { useDocument } from '../context/DocumentContext';
 import { PlusIcon, RefreshCwIcon, CheckIcon, XIcon, PenIcon, RotateCwIcon, CheckCircleIcon, UndoIcon, RedoIcon, SaveIcon, CloudIcon, ClockIcon } from 'lucide-react';
 import EditorToolbar from '../components/EditorToolbar';
+import { getQualityDescription } from '../utils/documentParsing';
 const EditorPage = () => {
   const {
     currentDocument,
@@ -205,6 +206,13 @@ const EditorPage = () => {
                 <span>Saved {formatLastSaved(currentDocument.lastSaved)}</span>
               </div>}
           </div>
+          {currentDocument.extractionQuality !== undefined && <div className="ml-4 flex items-center">
+              <div className={`w-2 h-2 rounded-full mr-2 ${currentDocument.extractionQuality >= 0.75 ? 'bg-green-500' : currentDocument.extractionQuality >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
+              <span>
+                Extraction quality:{' '}
+                {getQualityDescription(currentDocument.extractionQuality)}
+              </span>
+            </div>}
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState, useRef, createContext, useContext, createElement } from 'react';
+import { parseDocument, getQualityDescription } from '../utils/documentParsing';
 // Types
 type Sentence = {
   id: string;
@@ -26,6 +27,8 @@ type Document = {
   versionHistory?: DocumentVersion[];
   isSaving?: boolean;
   lastSaved?: Date;
+  extractionQuality?: number;
+  extractionSource?: string;
 };
 type DocumentHistoryState = {
   document: Document;
@@ -776,24 +779,27 @@ export const DocumentProvider: React.FC<{
       if (!supportedFormats.includes(fileExtension)) {
         throw new Error(`Unsupported file format: .${fileExtension}. Please upload .docx, .doc, .pdf, or .txt files.`);
       }
-      // In a real app, we would use a library to extract text from the file
-      // For this demo, we'll simulate text extraction with the file reader API
-      const text = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = e => {
-          // This only works for text files, but simulates the concept
-          const content = e.target?.result as string || '';
-          resolve(content);
-        };
-        reader.onerror = () => {
-          reject(new Error('Failed to read file'));
-        };
-        reader.readAsText(file);
+      // Show saving indicator during parsing
+      setIsSaving(true);
+      // Parse the document using our sequential approach with more permissive settings
+      const parseResult = await parseDocument(file, {
+        enableOcr: true,
+        maxPages: 50,
+        timeoutMs: 30000,
+        minQualityScore: 0.35,
+        minWordCount: 30 // Accept if we have at least this many words
       });
+      // Handle specific error cases
+      if (parseResult.error) {
+        throw new Error(parseResult.error.message);
+      }
+      if (!parseResult.text || parseResult.text.trim() === '') {
+        throw new Error(`Could not extract any text from the document. The file may be corrupted, password-protected, or contain only images without OCR processing.`);
+      }
       // Create a new document from the extracted text
       const name = file.name.split('.')[0]; // Use filename without extension
       const now = new Date();
-      const sentences = splitIntoSentences(text);
+      const sentences = splitIntoSentences(parseResult.text);
       const newDoc: Document = {
         id: `doc-${Date.now()}`,
         name,
@@ -804,13 +810,15 @@ export const DocumentProvider: React.FC<{
         version: 1,
         originalFormat: fileExtension,
         fileSize: file.size,
+        extractionQuality: parseResult.score,
+        extractionSource: parseResult.source,
         versionHistory: [{
           versionId: `v1-${Date.now()}`,
           versionNumber: 1,
           sentences: JSON.parse(JSON.stringify(sentences)),
           timestamp: now,
           createdBy: 'user',
-          comment: 'Initial upload'
+          comment: `Initial upload (Extraction quality: ${getQualityDescription(parseResult.score)})`
         }]
       };
       setDocuments(docs => [...docs, newDoc]);
@@ -827,8 +835,14 @@ export const DocumentProvider: React.FC<{
       setTimeout(() => {
         generateSuggestions();
       }, 300);
+      return {
+        success: true,
+        quality: parseResult.score,
+        source: parseResult.source
+      };
     } catch (error) {
       console.error('Error uploading document:', error);
+      setIsSaving(false);
       throw error;
     }
   }, [generateSuggestions, simulateCloudSave]);
