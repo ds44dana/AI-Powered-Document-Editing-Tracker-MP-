@@ -781,18 +781,12 @@ export const DocumentProvider: React.FC<{
       }
       // Show saving indicator during parsing
       setIsSaving(true);
-      // Parse the document using our sequential approach with more permissive settings
+      // Parse the document using our sequential approach
       const parseResult = await parseDocument(file, {
         enableOcr: true,
         maxPages: 50,
-        timeoutMs: 30000,
-        minQualityScore: 0.35,
-        minWordCount: 30 // Accept if we have at least this many words
+        timeoutMs: 30000
       });
-      // Handle specific error cases
-      if (parseResult.error) {
-        throw new Error(parseResult.error.message);
-      }
       if (!parseResult.text || parseResult.text.trim() === '') {
         throw new Error(`Could not extract any text from the document. The file may be corrupted, password-protected, or contain only images without OCR processing.`);
       }

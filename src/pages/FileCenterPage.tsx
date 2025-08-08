@@ -22,11 +22,6 @@ const FileCenterPage = () => {
   const [renamingDocId, setRenamingDocId] = useState<string | null>(null);
   const [newDocName, setNewDocName] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadErrorDetails, setUploadErrorDetails] = useState<{
-    code?: string;
-    actionable?: boolean;
-    suggestedAction?: string;
-  } | null>(null);
   const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
   const [viewingVersionsDocId, setViewingVersionsDocId] = useState<string | null>(null);
   const [confirmRollbackVersionId, setConfirmRollbackVersionId] = useState<string | null>(null);
@@ -71,7 +66,6 @@ const FileCenterPage = () => {
     if (!files || files.length === 0) return;
     const file = files[0];
     setUploadError(null);
-    setUploadErrorDetails(null);
     setUploadStatus({
       isUploading: true,
       progress: 10
@@ -94,28 +88,7 @@ const FileCenterPage = () => {
       });
       navigate('/editor');
     } catch (error) {
-      const errorMessage = (error as Error).message;
-      setUploadError(errorMessage);
-      // Try to extract error code and actionable status
-      if (errorMessage.includes('PDF is password-protected')) {
-        setUploadErrorDetails({
-          code: 'PDF_ENCRYPTED',
-          actionable: true,
-          suggestedAction: 'Upload an unprotected version of this document'
-        });
-      } else if (errorMessage.includes('no text layer')) {
-        setUploadErrorDetails({
-          code: 'PDF_NO_TEXT_LAYER',
-          actionable: true,
-          suggestedAction: 'Process with OCR'
-        });
-      } else if (errorMessage.includes('Unsupported file format')) {
-        setUploadErrorDetails({
-          code: 'UNSUPPORTED_FORMAT',
-          actionable: true,
-          suggestedAction: 'Upload a supported file format'
-        });
-      }
+      setUploadError((error as Error).message);
       setUploadStatus({
         isUploading: false,
         progress: 0
@@ -200,21 +173,11 @@ const FileCenterPage = () => {
           </div>
         </div>}
 
-      {uploadError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium">{uploadError}</p>
-              {uploadErrorDetails?.actionable && <p className="text-sm mt-1">
-                  Suggestion: {uploadErrorDetails.suggestedAction}
-                </p>}
-            </div>
-            <button onClick={() => {
-          setUploadError(null);
-          setUploadErrorDetails(null);
-        }} className="text-red-500">
-              <XIcon className="h-4 w-4" />
-            </button>
-          </div>
+      {uploadError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6 flex items-center justify-between">
+          <span>{uploadError}</span>
+          <button onClick={() => setUploadError(null)} className="text-red-500">
+            <TrashIcon className="h-4 w-4" />
+          </button>
         </div>}
 
       {/* Delete confirmation modal */}

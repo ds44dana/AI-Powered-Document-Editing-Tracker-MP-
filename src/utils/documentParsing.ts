@@ -32,30 +32,19 @@ export type ParseResult = {
     n: number;
     text: string;
   }[];
-  error?: {
-    code: string;
-    message: string;
-    actionable?: boolean;
-    suggestedAction?: string;
-  };
 };
 export type ParseOptions = {
   timeoutMs?: number;
   maxPages?: number;
   enableOcr?: boolean;
   ocrLanguage?: string;
-  minQualityScore?: number;
-  minWordCount?: number;
 };
 const DEFAULT_OPTIONS: ParseOptions = {
   timeoutMs: 30000,
   // 30 seconds
   maxPages: 50,
   enableOcr: true,
-  ocrLanguage: 'eng',
-  minQualityScore: 0.35,
-  // Lowered from 0.65 to be more permissive
-  minWordCount: 30 // Accept docs with at least this many words regardless of score
+  ocrLanguage: 'eng'
 };
 
 /**
@@ -85,65 +74,6 @@ export function scoreQuality(text: string): number {
 }
 
 /**
- * Count words in a text string
- */
-export function countWords(text: string): number {
-  if (!text) return 0;
-  return text.trim().split(/\s+/).length;
-}
-
-/**
- * Check if a PDF has a text layer using pdf.js
- */
-export async function pdfHasTextLayer(arrayBuffer: ArrayBuffer): Promise<boolean> {
-  try {
-    if (!pdfjs || !pdfjs.getDocument) {
-      return false;
-    }
-    const loadingTask = pdfjs.getDocument({
-      data: arrayBuffer
-    });
-    const doc = await loadingTask.promise;
-    let wordCount = 0;
-    // Check first 3 pages at most
-    for (let i = 1; i <= Math.min(doc.numPages, 3); i++) {
-      const page = await doc.getPage(i);
-      const content = await page.getTextContent();
-      wordCount += content.items.length;
-      // If we found enough text items, we can stop checking
-      if (wordCount > 20) {
-        return true;
-      }
-    }
-    return wordCount > 0;
-  } catch (error) {
-    console.error('Error checking PDF text layer:', error);
-    return false;
-  }
-}
-
-/**
- * Check if a PDF is encrypted/password-protected
- */
-export async function isPdfEncrypted(arrayBuffer: ArrayBuffer): Promise<boolean> {
-  try {
-    if (!pdfjs || !pdfjs.getDocument) {
-      return false;
-    }
-    const loadingTask = pdfjs.getDocument({
-      data: arrayBuffer
-    });
-    const doc = await loadingTask.promise;
-    // Check if the PDF is encrypted
-    return !!doc.encrypted;
-  } catch (error) {
-    // Check for password errors in the exception
-    const errorMsg = String(error).toLowerCase();
-    return errorMsg.includes('password') || errorMsg.includes('encrypted') || errorMsg.includes('permission');
-  }
-}
-
-/**
  * Parse a DOCX file using mammoth (if available)
  */
 export async function parseDocx(file: File): Promise<ParseResult> {
@@ -158,10 +88,8 @@ export async function parseDocx(file: File): Promise<ParseResult> {
           text: '',
           score: 0,
           source: 'mammoth-not-installed',
-          error: {
-            code: 'MISSING_LIBRARY',
-            message: 'The mammoth library is not installed.',
-            actionable: false
+          meta: {
+            error: 'The mammoth library is not installed. Please install it with: npm install mammoth'
           }
         };
       }
@@ -172,16 +100,12 @@ export async function parseDocx(file: File): Promise<ParseResult> {
     });
     const text = result.value;
     const score = scoreQuality(text);
-    const wordCount = countWords(text);
-    // Log debug info
-    console.log(`DOCX parse result: score=${score}, words=${wordCount}, warnings=${result.messages?.length || 0}`);
     return {
       text,
       score,
       source: 'mammoth',
       meta: {
-        warnings: result.messages,
-        wordCount
+        warnings: result.messages
       }
     };
   } catch (error) {
@@ -190,10 +114,8 @@ export async function parseDocx(file: File): Promise<ParseResult> {
       text: '',
       score: 0,
       source: 'mammoth-failed',
-      error: {
-        code: 'DOCX_PARSE_ERROR',
-        message: 'Failed to parse DOCX file: ' + String(error),
-        actionable: false
+      meta: {
+        error: String(error)
       }
     };
   }
@@ -213,60 +135,12 @@ export async function parsePdf(file: File, options: ParseOptions = {}): Promise<
         text: '',
         score: 0,
         source: 'pdfjs-not-installed',
-        error: {
-          code: 'MISSING_LIBRARY',
-          message: 'The pdfjs-dist library is not installed.',
-          actionable: false
+        meta: {
+          error: 'The pdfjs-dist library is not installed. Please install it with: npm install pdfjs-dist'
         }
       };
     }
     const arrayBuffer = await file.arrayBuffer();
-    // Check if the PDF is encrypted
-    const isEncrypted = await isPdfEncrypted(arrayBuffer);
-    if (isEncrypted) {
-      return {
-        text: '',
-        score: 0,
-        source: 'pdf-encrypted',
-        error: {
-          code: 'PDF_ENCRYPTED',
-          message: 'This PDF is password-protected. Please remove the password protection and try again.',
-          actionable: true,
-          suggestedAction: 'Upload an unprotected version of this document'
-        }
-      };
-    }
-    // Check if the PDF has a text layer before attempting full extraction
-    const hasTextLayer = await pdfHasTextLayer(arrayBuffer);
-    if (!hasTextLayer) {
-      console.log('PDF has no text layer, may need OCR');
-      // If no text layer and OCR is enabled, we'll let the orchestrator handle OCR
-      if (opts.enableOcr) {
-        return {
-          text: '',
-          score: 0,
-          source: 'pdf-no-text-layer',
-          error: {
-            code: 'PDF_NO_TEXT_LAYER',
-            message: 'This PDF does not contain selectable text and may need OCR processing.',
-            actionable: true,
-            suggestedAction: 'Process with OCR'
-          }
-        };
-      } else {
-        return {
-          text: '',
-          score: 0,
-          source: 'pdf-no-text-layer',
-          error: {
-            code: 'PDF_NO_TEXT_LAYER',
-            message: 'This PDF does not contain selectable text. Please enable OCR or upload a version with selectable text.',
-            actionable: false
-          }
-        };
-      }
-    }
-    // Extract text from the PDF
     const pdf = await pdfjs.getDocument({
       data: arrayBuffer
     }).promise;
@@ -288,9 +162,6 @@ export async function parsePdf(file: File, options: ParseOptions = {}): Promise<
       fullText += pageText + '\n\n';
     }
     const score = scoreQuality(fullText);
-    const wordCount = countWords(fullText);
-    // Log debug info
-    console.log(`PDF parse result: score=${score}, words=${wordCount}, pages=${numPages}`);
     return {
       text: fullText,
       score,
@@ -298,35 +169,17 @@ export async function parsePdf(file: File, options: ParseOptions = {}): Promise<
       pages,
       meta: {
         pageCount: pdf.numPages,
-        extractedPages: numPages,
-        wordCount
+        extractedPages: numPages
       }
     };
   } catch (error) {
     console.error('Error parsing PDF with pdf.js:', error);
-    // Check for specific error types
-    const errorMsg = String(error).toLowerCase();
-    if (errorMsg.includes('password') || errorMsg.includes('encrypted')) {
-      return {
-        text: '',
-        score: 0,
-        source: 'pdf-encrypted',
-        error: {
-          code: 'PDF_ENCRYPTED',
-          message: 'This PDF is password-protected. Please remove the password protection and try again.',
-          actionable: true,
-          suggestedAction: 'Upload an unprotected version of this document'
-        }
-      };
-    }
     return {
       text: '',
       score: 0,
       source: 'pdf.js-failed',
-      error: {
-        code: 'PDF_PARSE_ERROR',
-        message: 'Failed to parse PDF file: ' + String(error),
-        actionable: false
+      meta: {
+        error: String(error)
       }
     };
   }
@@ -339,16 +192,10 @@ export async function parseTxt(file: File): Promise<ParseResult> {
   try {
     const text = await file.text();
     const score = scoreQuality(text);
-    const wordCount = countWords(text);
-    // Log debug info
-    console.log(`TXT parse result: score=${score}, words=${wordCount}`);
     return {
       text,
       score,
-      source: 'text-reader',
-      meta: {
-        wordCount
-      }
+      source: 'text-reader'
     };
   } catch (error) {
     console.error('Error parsing TXT:', error);
@@ -356,10 +203,8 @@ export async function parseTxt(file: File): Promise<ParseResult> {
       text: '',
       score: 0,
       source: 'text-reader-failed',
-      error: {
-        code: 'TXT_PARSE_ERROR',
-        message: 'Failed to parse text file: ' + String(error),
-        actionable: false
+      meta: {
+        error: String(error)
       }
     };
   }
@@ -384,69 +229,40 @@ export async function runOcr(file: File, options: ParseOptions = {}): Promise<Pa
           text: '',
           score: 0,
           source: 'tesseract-not-installed',
-          error: {
-            code: 'MISSING_LIBRARY',
-            message: 'The tesseract.js library is not installed.',
-            actionable: false
+          meta: {
+            error: 'The tesseract.js library is not installed. Please install it with: npm install tesseract.js'
           }
         };
       }
     }
     // For this demo, we'll only support OCR on images directly
-    // In a real implementation, we would convert PDFs/DOCs to images first
     if (!file.type.startsWith('image/')) {
-      // For PDFs, we'd need to render pages to images first
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        console.log('PDF OCR would be implemented in production version');
-        // In a real implementation, we would:
-        // 1. Use pdf.js to render each page to a canvas
-        // 2. Convert canvas to image
-        // 3. Run OCR on each image
-        // 4. Combine results
-        return {
-          text: '',
-          score: 0,
-          source: 'ocr-pdf-not-implemented',
-          error: {
-            code: 'OCR_PDF_NOT_IMPLEMENTED',
-            message: 'OCR for PDFs is not implemented in this demo version.',
-            actionable: false
-          }
-        };
-      }
       return {
         text: '',
         score: 0,
         source: 'ocr-unsupported-type',
-        error: {
-          code: 'OCR_UNSUPPORTED_TYPE',
-          message: 'OCR is only supported for image files in this demo.',
-          actionable: false
+        meta: {
+          error: 'OCR only supported on images in this demo'
         }
       };
     }
     // Create a URL for the image
     const imageUrl = URL.createObjectURL(file);
-    console.log('Starting OCR processing...');
     // Run OCR using Tesseract
     const result = await Tesseract.recognize(imageUrl, opts.ocrLanguage || 'eng', {
-      logger: m => console.log(`OCR progress: ${m.status} (${Math.round(m.progress * 100)}%)`)
+      logger: m => console.log(m)
     });
     // Clean up the URL
     URL.revokeObjectURL(imageUrl);
     const text = result.data.text;
     const score = scoreQuality(text);
-    const wordCount = countWords(text);
-    // Log debug info
-    console.log(`OCR result: score=${score}, words=${wordCount}, confidence=${result.data.confidence}`);
     return {
       text,
       score,
       source: 'tesseract-ocr',
       meta: {
         confidence: result.data.confidence,
-        words: result.data.words.length,
-        wordCount
+        words: result.data.words.length
       }
     };
   } catch (error) {
@@ -455,10 +271,8 @@ export async function runOcr(file: File, options: ParseOptions = {}): Promise<Pa
       text: '',
       score: 0,
       source: 'ocr-failed',
-      error: {
-        code: 'OCR_FAILED',
-        message: 'OCR processing failed: ' + String(error),
-        actionable: false
+      meta: {
+        error: String(error)
       }
     };
   }
@@ -480,8 +294,6 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
     score: 0,
     source: 'none'
   };
-  // For debugging
-  console.log(`Parsing document: ${file.name} (${file.type}, ${file.size} bytes)`);
   // Create a controller for timeout
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs);
@@ -489,122 +301,55 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
     // Step 1: Parse based on file extension
     if (fileExtension === 'docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       const result = await parseDocx(file);
-      if (result.text) {
-        const wordCount = countWords(result.text);
-        // Accept if word count is sufficient, regardless of score
-        if (wordCount >= opts.minWordCount!) {
-          console.log(`DOCX accepted based on word count: ${wordCount} words`);
-          return result;
-        }
-        // Accept if score is good enough
-        if (result.score >= opts.minQualityScore!) {
-          console.log(`DOCX accepted based on quality score: ${result.score}`);
-          return result;
-        }
-        // Store as best result if better than current best
-        if (result.score > bestResult.score) {
-          bestResult = result;
-        }
+      if (result.score > bestResult.score) {
+        bestResult = result;
+      }
+      // If score is good enough, return early
+      if (result.score >= 0.65) {
+        return bestResult;
       }
     } else if (fileExtension === 'pdf' || mimeType === 'application/pdf') {
       const result = await parsePdf(file, opts);
-      // If the PDF is encrypted or has no text layer, return that result directly
-      if (result.error?.code === 'PDF_ENCRYPTED' || result.error?.code === 'PDF_NO_TEXT_LAYER') {
-        return result;
+      if (result.score > bestResult.score) {
+        bestResult = result;
       }
-      if (result.text) {
-        const wordCount = countWords(result.text);
-        // Accept if word count is sufficient, regardless of score
-        if (wordCount >= opts.minWordCount!) {
-          console.log(`PDF accepted based on word count: ${wordCount} words`);
-          return result;
-        }
-        // Accept if score is good enough
-        if (result.score >= opts.minQualityScore!) {
-          console.log(`PDF accepted based on quality score: ${result.score}`);
-          return result;
-        }
-        // Store as best result if better than current best
-        if (result.score > bestResult.score) {
-          bestResult = result;
-        }
+      // If score is good enough, return early
+      if (result.score >= 0.65) {
+        return bestResult;
       }
     } else if (fileExtension === 'txt' || mimeType === 'text/plain') {
       const result = await parseTxt(file);
-      if (result.text) {
-        const wordCount = countWords(result.text);
-        // Accept if word count is sufficient, regardless of score
-        if (wordCount >= opts.minWordCount!) {
-          console.log(`TXT accepted based on word count: ${wordCount} words`);
-          return result;
-        }
-        // Accept if score is good enough
-        if (result.score >= opts.minQualityScore!) {
-          console.log(`TXT accepted based on quality score: ${result.score}`);
-          return result;
-        }
-        // Store as best result if better than current best
-        if (result.score > bestResult.score) {
-          bestResult = result;
-        }
+      if (result.score > bestResult.score) {
+        bestResult = result;
       }
-    } else {
-      // Unsupported file format
-      return {
-        text: '',
-        score: 0,
-        source: 'unsupported-format',
-        error: {
-          code: 'UNSUPPORTED_FORMAT',
-          message: `Unsupported file format: .${fileExtension}. Please upload .docx, .pdf, or .txt files.`,
-          actionable: true,
-          suggestedAction: 'Upload a supported file format'
-        }
-      };
-    }
-    // Step 2: If we have any text at all but score is low, use it anyway
-    // This prevents "no text extracted" errors when we actually did get some text
-    if (bestResult.text && bestResult.text.trim()) {
-      const wordCount = countWords(bestResult.text);
-      // If we have a decent amount of words, use this result despite low score
-      if (wordCount >= 10) {
-        console.log(`Using low quality text (score: ${bestResult.score}) with ${wordCount} words`);
+      // If score is good enough, return early
+      if (result.score >= 0.65) {
         return bestResult;
       }
     }
-    // Step 3: If text extraction failed or quality is very poor, try OCR as last resort
-    if ((!bestResult.text || bestResult.score < 0.2) && opts.enableOcr) {
-      console.log('Text extraction failed or quality is poor, attempting OCR...');
+    // Step 2: If score is still poor, try alternative parsing methods
+    if (bestResult.score < 0.65) {
+      // For PDFs, try an alternative PDF parsing method
+      if (fileExtension === 'pdf' || mimeType === 'application/pdf') {
+        // In a real app, we would try an alternative PDF parser here
+        console.log('Would try alternative PDF parser here');
+      }
+      // For DOCXs, try an alternative DOCX parsing method
+      if (fileExtension === 'docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        // In a real app, we would try an alternative DOCX parser here
+        console.log('Would try alternative DOCX parser here');
+      }
+    }
+    // Step 3: If score is still very poor, try OCR as last resort
+    if (bestResult.score < 0.35 && opts.enableOcr) {
+      console.log('Text extraction quality is poor, attempting OCR...');
       const ocrResult = await runOcr(file, opts);
-      if (ocrResult.text) {
-        const wordCount = countWords(ocrResult.text);
-        // Accept OCR result if it has enough words
-        if (wordCount >= Math.max(10, opts.minWordCount! / 2)) {
-          console.log(`OCR accepted with ${wordCount} words`);
-          return ocrResult;
-        }
-        // Store as best result if better than current best
-        if (ocrResult.score > bestResult.score) {
-          bestResult = ocrResult;
-        }
+      if (ocrResult.score > bestResult.score) {
+        bestResult = ocrResult;
       }
     }
-    // If we have any text at all at this point, return it
-    if (bestResult.text && bestResult.text.trim()) {
-      return bestResult;
-    }
-    // If we get here, all extraction methods failed
-    return {
-      text: '',
-      score: 0,
-      source: 'extraction-failed',
-      error: {
-        code: 'NO_TEXT_EXTRACTED',
-        message: 'Could not extract any text from the document. The file may be corrupted, password-protected, or contain only images without OCR processing.',
-        actionable: opts.enableOcr ? false : true,
-        suggestedAction: opts.enableOcr ? undefined : 'Enable OCR processing'
-      }
-    };
+    // Return the best result we found
+    return bestResult;
   } catch (error) {
     if (error.name === 'AbortError') {
       console.error('Document parsing timed out');
@@ -612,10 +357,9 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
         text: bestResult.text || '',
         score: bestResult.score,
         source: bestResult.source || 'timeout',
-        error: {
-          code: 'PARSING_TIMEOUT',
-          message: 'Document processing timed out.',
-          actionable: false
+        meta: {
+          error: 'Processing timed out',
+          ...bestResult.meta
         }
       };
     }
@@ -624,10 +368,9 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
       text: bestResult.text || '',
       score: bestResult.score,
       source: bestResult.source || 'error',
-      error: {
-        code: 'PARSING_ERROR',
-        message: 'Error processing document: ' + String(error),
-        actionable: false
+      meta: {
+        error: String(error),
+        ...bestResult.meta
       }
     };
   } finally {
