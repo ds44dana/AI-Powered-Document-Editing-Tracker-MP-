@@ -22,6 +22,11 @@ const FileCenterPage = () => {
   const [renamingDocId, setRenamingDocId] = useState<string | null>(null);
   const [newDocName, setNewDocName] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadErrorDetails, setUploadErrorDetails] = useState<{
+    code?: string;
+    actionable?: boolean;
+    suggestedAction?: string;
+  } | null>(null);
   const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
   const [viewingVersionsDocId, setViewingVersionsDocId] = useState<string | null>(null);
   const [confirmRollbackVersionId, setConfirmRollbackVersionId] = useState<string | null>(null);
@@ -66,6 +71,7 @@ const FileCenterPage = () => {
     if (!files || files.length === 0) return;
     const file = files[0];
     setUploadError(null);
+    setUploadErrorDetails(null);
     setUploadStatus({
       isUploading: true,
       progress: 10
@@ -88,7 +94,46 @@ const FileCenterPage = () => {
       });
       navigate('/editor');
     } catch (error) {
-      setUploadError((error as Error).message);
+      const errorMessage = (error as Error).message;
+      setUploadError(errorMessage);
+      // Try to extract error code and actionable status from more specific error types
+      if (errorMessage.includes('PDF is password-protected') || errorMessage.includes('password protection')) {
+        setUploadErrorDetails({
+          code: 'PDF_ENCRYPTED',
+          actionable: true,
+          suggestedAction: 'Upload an unprotected version of this document'
+        });
+      } else if (errorMessage.includes('no text layer')) {
+        setUploadErrorDetails({
+          code: 'PDF_NO_TEXT_LAYER',
+          actionable: true,
+          suggestedAction: 'Process with OCR'
+        });
+      } else if (errorMessage.includes('Legacy .doc format')) {
+        setUploadErrorDetails({
+          code: 'LEGACY_DOC_FORMAT',
+          actionable: true,
+          suggestedAction: 'Convert to .docx and try again'
+        });
+      } else if (errorMessage.includes('corrupted') && errorMessage.includes('Office document')) {
+        setUploadErrorDetails({
+          code: 'DOCX_NOT_VALID_ZIP',
+          actionable: true,
+          suggestedAction: 'Resave document in Word and try again'
+        });
+      } else if (errorMessage.includes('password-protected') && (errorMessage.includes('document') || errorMessage.includes('Word'))) {
+        setUploadErrorDetails({
+          code: 'DOCX_PASSWORD_PROTECTED',
+          actionable: true,
+          suggestedAction: 'Remove password protection and try again'
+        });
+      } else if (errorMessage.includes('Unsupported file format')) {
+        setUploadErrorDetails({
+          code: 'UNSUPPORTED_FORMAT',
+          actionable: true,
+          suggestedAction: 'Upload a supported file format'
+        });
+      }
       setUploadStatus({
         isUploading: false,
         progress: 0
@@ -173,11 +218,31 @@ const FileCenterPage = () => {
           </div>
         </div>}
 
-      {uploadError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6 flex items-center justify-between">
-          <span>{uploadError}</span>
-          <button onClick={() => setUploadError(null)} className="text-red-500">
-            <TrashIcon className="h-4 w-4" />
-          </button>
+      {uploadError && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium">{uploadError}</p>
+              {uploadErrorDetails?.actionable && <p className="text-sm mt-1">
+                  <span className="font-medium">Suggestion:</span>{' '}
+                  {uploadErrorDetails.suggestedAction}
+                </p>}
+              {uploadErrorDetails?.code === 'LEGACY_DOC_FORMAT' && <p className="text-sm mt-2">
+                  To convert a .doc file to .docx: Open the file in Microsoft
+                  Word, then use "Save As" and select the .docx format.
+                </p>}
+              {uploadErrorDetails?.code === 'DOCX_PASSWORD_PROTECTED' && <p className="text-sm mt-2">
+                  To remove password protection: Open the document in Word, go
+                  to "File" → "Info" → "Protect Document" → "Encrypt with
+                  Password" and remove the password.
+                </p>}
+            </div>
+            <button onClick={() => {
+          setUploadError(null);
+          setUploadErrorDetails(null);
+        }} className="text-red-500">
+              <XIcon className="h-4 w-4" />
+            </button>
+          </div>
         </div>}
 
       {/* Delete confirmation modal */}
