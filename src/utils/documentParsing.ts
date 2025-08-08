@@ -2,7 +2,6 @@
 let mammoth: any = null;
 let Tesseract: any = null;
 let pdfjs: any = null;
-let JSZip: any = null;
 
 // Try to load pdfjs-dist
 try {
@@ -112,68 +111,6 @@ export function isLegacyDoc(file: File): boolean {
 }
 
 /**
- * Check DOCX file signature (ZIP header)
- * @param buffer ArrayBuffer from the file
- * @returns boolean indicating if the file has a valid DOCX/ZIP signature
- */
-export function hasValidDocxSignature(buffer: ArrayBuffer): boolean {
-  // DOCX files are ZIP files with specific structure
-  // ZIP file signature is 50 4B 03 04 (PK..)
-  const array = new Uint8Array(buffer.slice(0, 4));
-  const signature = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
-  console.log(`File signature: ${signature}`);
-  // Check for ZIP signature
-  return signature.toLowerCase() === '504b0304';
-}
-
-/**
- * Extract text from DOCX file using direct ZIP extraction (fallback for mammoth)
- * This is a simpler implementation than the server-side one suggested, but works in browser
- */
-export async function extractDocxWithoutMammoth(buffer: ArrayBuffer): Promise<string> {
-  try {
-    // Dynamically import JSZip if not already loaded
-    if (!JSZip) {
-      try {
-        JSZip = (await import('jszip')).default;
-      } catch (e) {
-        console.error('JSZip library not available:', e.message);
-        throw new Error('JSZip library is required for DOCX fallback extraction');
-      }
-    }
-    // Quick signature check
-    if (!hasValidDocxSignature(buffer)) {
-      throw new Error('Not a valid DOCX/ZIP container');
-    }
-    // Load the ZIP file
-    const zip = new JSZip();
-    const zipFile = await zip.loadAsync(buffer);
-    // Get the main document content
-    const documentXml = zipFile.file('word/document.xml');
-    if (!documentXml) {
-      throw new Error('document.xml not found in DOCX');
-    }
-    // Get the XML content
-    const xml = await documentXml.async('text');
-    // Extract visible text runs <w:t>...</w:t>
-    const textMatches = xml.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) || [];
-    const texts = textMatches.map(match => {
-      // Extract content between tags
-      const content = match.replace(/<w:t[^>]*>([\s\S]*?)<\/w:t>/, '$1');
-      // Basic XML entity decoding
-      return content.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
-    });
-    // Join all text elements with spaces
-    const text = texts.join(' ').replace(/\s+/g, ' ').trim();
-    console.log(`Extracted ${texts.length} text elements using direct ZIP method`);
-    return text;
-  } catch (error) {
-    console.error('Error in direct DOCX extraction:', error);
-    throw error;
-  }
-}
-
-/**
  * Check if a PDF has a text layer using pdf.js
  */
 export async function pdfHasTextLayer(arrayBuffer: ArrayBuffer): Promise<boolean> {
@@ -225,7 +162,7 @@ export async function isPdfEncrypted(arrayBuffer: ArrayBuffer): Promise<boolean>
 }
 
 /**
- * Parse a DOCX file using mammoth (if available) with fallback to direct ZIP extraction
+ * Parse a DOCX file using mammoth (if available)
  */
 export async function parseDocx(file: File): Promise<ParseResult> {
   try {
@@ -244,64 +181,84 @@ export async function parseDocx(file: File): Promise<ParseResult> {
         }
       };
     }
+    // Try to dynamically load mammoth if not already loaded
+    if (!mammoth) {
+      try {
+        mammoth = await import('mammoth');
+      } catch (e) {
+        console.warn('mammoth library not available:', e.message);
+        return {
+          text: '',
+          score: 0,
+          source: 'mammoth-not-installed',
+          error: {
+            code: 'MISSING_LIBRARY',
+            message: 'The mammoth library is not installed. This is required for processing Word documents.',
+            actionable: false
+          }
+        };
+      }
+    }
     // Get the raw binary data from the file
     const arrayBuffer = await file.arrayBuffer();
     // Log information about the file for debugging
     console.log(`Processing DOCX: ${file.name}, size: ${file.size} bytes, type: ${file.type}`);
-    // Verify file signature
-    if (!hasValidDocxSignature(arrayBuffer)) {
-      console.error('Invalid DOCX signature');
+    // Explicitly create a buffer from the array buffer to ensure proper binary data handling
+    try {
+      const result = await mammoth.extractRawText({
+        arrayBuffer
+      });
+      const text = result.value;
+      // If we got no text but no error was thrown, it might be a parsing issue
+      if (!text || text.trim() === '') {
+        console.log('Mammoth extracted empty text without error');
+        return {
+          text: '',
+          score: 0,
+          source: 'mammoth-empty-result',
+          error: {
+            code: 'DOCX_EMPTY_RESULT',
+            message: 'No text could be extracted from this Word document. The file may be empty, corrupted, or in an unsupported format.',
+            actionable: true,
+            suggestedAction: 'Check if the document contains actual text content'
+          }
+        };
+      }
+      const score = scoreQuality(text);
+      const wordCount = countWords(text);
+      // Log debug info
+      console.log(`DOCX parse result: score=${score}, words=${wordCount}, warnings=${result.messages?.length || 0}`);
+      // Check if we have a reasonable amount of text
+      if (wordCount < 5 && score < 0.3) {
+        return {
+          text,
+          score,
+          source: 'mammoth-low-content',
+          error: {
+            code: 'DOCX_LOW_CONTENT',
+            message: 'Very little text was extracted from this document. It may be mostly images or formatted in a way our parser cannot read.',
+            actionable: false
+          },
+          meta: {
+            warnings: result.messages,
+            wordCount
+          }
+        };
+      }
       return {
-        text: '',
-        score: 0,
-        source: 'invalid-docx-signature',
-        error: {
-          code: 'INVALID_DOCX_SIGNATURE',
-          message: 'This file does not appear to be a valid DOCX file. The file may be corrupted.',
-          actionable: true,
-          suggestedAction: 'Please try resaving the document in Word and upload again'
+        text,
+        score,
+        source: 'mammoth',
+        meta: {
+          warnings: result.messages,
+          wordCount
         }
       };
-    }
-    // APPROACH 1: Try to use mammoth if available
-    let mammothResult = null;
-    try {
-      // Try to dynamically load mammoth if not already loaded
-      if (!mammoth) {
-        try {
-          mammoth = await import('mammoth');
-          console.log('Mammoth library loaded successfully');
-        } catch (e) {
-          console.warn('mammoth library not available:', e.message);
-        }
-      }
-      if (mammoth) {
-        // Attempt to use mammoth for extraction
-        console.log('Attempting extraction with mammoth...');
-        const result = await mammoth.extractRawText({
-          arrayBuffer
-        });
-        const text = result.value;
-        // If we got text, use it
-        if (text && text.trim() !== '') {
-          console.log('Mammoth extraction successful');
-          mammothResult = {
-            text,
-            score: scoreQuality(text),
-            source: 'mammoth',
-            meta: {
-              warnings: result.messages,
-              wordCount: countWords(text)
-            }
-          };
-        } else {
-          console.log('Mammoth returned empty text without error');
-        }
-      }
     } catch (mammothError) {
       console.error('Error in mammoth.js processing:', mammothError);
-      // Check for specific mammoth errors
+      // Attempt to extract error details
       const errorMsg = String(mammothError).toLowerCase();
+      // Check for specific error types
       if (errorMsg.includes('zip') || errorMsg.includes('archive')) {
         return {
           text: '',
@@ -328,44 +285,17 @@ export async function parseDocx(file: File): Promise<ParseResult> {
           }
         };
       }
+      return {
+        text: '',
+        score: 0,
+        source: 'mammoth-failed',
+        error: {
+          code: 'DOCX_PARSE_ERROR',
+          message: 'Failed to parse Word document: ' + String(mammothError),
+          actionable: false
+        }
+      };
     }
-    // If mammoth worked, return its result
-    if (mammothResult && mammothResult.text) {
-      return mammothResult;
-    }
-    // APPROACH 2: Fallback to direct ZIP extraction
-    console.log('Mammoth failed or unavailable, trying direct ZIP extraction...');
-    try {
-      const extractedText = await extractDocxWithoutMammoth(arrayBuffer);
-      if (extractedText && extractedText.trim() !== '') {
-        const score = scoreQuality(extractedText);
-        const wordCount = countWords(extractedText);
-        console.log(`Direct ZIP extraction successful: ${wordCount} words, score=${score}`);
-        return {
-          text: extractedText,
-          score: score,
-          source: 'direct-zip-extraction',
-          meta: {
-            wordCount: wordCount,
-            fallbackMethod: true
-          }
-        };
-      }
-    } catch (zipError) {
-      console.error('Error in direct ZIP extraction:', zipError);
-    }
-    // If we get here, both extraction methods failed
-    return {
-      text: '',
-      score: 0,
-      source: 'docx-extraction-failed',
-      error: {
-        code: 'DOCX_NO_TEXT_EXTRACTED',
-        message: 'No text could be extracted from this Word document. The document may contain only images, shapes, or text in unsupported elements.',
-        actionable: true,
-        suggestedAction: 'Try saving the document as PDF and upload again'
-      }
-    };
   } catch (error) {
     console.error('Error in DOCX parsing wrapper:', error);
     return {
@@ -669,9 +599,7 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
   const timeoutId = setTimeout(() => controller.abort(), opts.timeoutMs);
   try {
     // Step 1: Parse based on file extension and mime type
-    if (fileExtension === 'docx' || fileExtension === 'doc' || mimeType === 'application/msword' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-    // Also handle generic binary types that might be Word docs
-    mimeType === 'application/octet-stream' && (fileExtension === 'docx' || fileExtension === 'doc')) {
+    if (fileExtension === 'docx' || fileExtension === 'doc' || mimeType === 'application/msword' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
       console.log('Detected Word document, attempting to parse...');
       // Check if it's a legacy .doc file
       if (isLegacyDoc(file)) {
@@ -689,7 +617,7 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
       }
       const result = await parseDocx(file);
       // If there's a specific error, return it directly
-      if (result.error?.code && ['LEGACY_DOC_FORMAT', 'DOCX_NOT_VALID_ZIP', 'DOCX_PASSWORD_PROTECTED', 'INVALID_DOCX_SIGNATURE'].includes(result.error.code)) {
+      if (result.error?.code && ['LEGACY_DOC_FORMAT', 'DOCX_NOT_VALID_ZIP', 'DOCX_PASSWORD_PROTECTED'].includes(result.error.code)) {
         return result;
       }
       if (result.text) {
@@ -709,7 +637,7 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
           bestResult = result;
         }
       }
-    } else if (fileExtension === 'pdf' || mimeType === 'application/pdf' || mimeType === 'application/octet-stream' && fileExtension === 'pdf') {
+    } else if (fileExtension === 'pdf' || mimeType === 'application/pdf') {
       const result = await parsePdf(file, opts);
       // If the PDF is encrypted or has no text layer, return that result directly
       if (result.error?.code === 'PDF_ENCRYPTED' || result.error?.code === 'PDF_NO_TEXT_LAYER') {
@@ -732,7 +660,7 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
           bestResult = result;
         }
       }
-    } else if (fileExtension === 'txt' || mimeType === 'text/plain' || mimeType === 'application/octet-stream' && fileExtension === 'txt') {
+    } else if (fileExtension === 'txt' || mimeType === 'text/plain') {
       const result = await parseTxt(file);
       if (result.text) {
         const wordCount = countWords(result.text);
@@ -797,31 +725,17 @@ export async function parseDocument(file: File, options: ParseOptions = {}): Pro
       return bestResult;
     }
     // If we get here, all extraction methods failed
-    if (fileExtension === 'docx') {
-      return {
-        text: '',
-        score: 0,
-        source: 'docx-extraction-failed',
-        error: {
-          code: 'DOCX_NO_TEXT_EXTRACTED',
-          message: 'No text could be extracted from this Word document. The document may contain only images, shapes, or text in unsupported elements.',
-          actionable: true,
-          suggestedAction: 'Try saving the document as PDF and upload again'
-        }
-      };
-    } else {
-      return {
-        text: '',
-        score: 0,
-        source: 'extraction-failed',
-        error: {
-          code: 'NO_TEXT_EXTRACTED',
-          message: 'Could not extract any text from the document. The file may be corrupted, password-protected, or contain only images without OCR processing.',
-          actionable: opts.enableOcr ? false : true,
-          suggestedAction: opts.enableOcr ? undefined : 'Enable OCR processing'
-        }
-      };
-    }
+    return {
+      text: '',
+      score: 0,
+      source: 'extraction-failed',
+      error: {
+        code: 'NO_TEXT_EXTRACTED',
+        message: 'Could not extract any text from the document. The file may be corrupted, password-protected, or contain only images without OCR processing.',
+        actionable: opts.enableOcr ? false : true,
+        suggestedAction: opts.enableOcr ? undefined : 'Enable OCR processing'
+      }
+    };
   } catch (error) {
     if (error.name === 'AbortError') {
       console.error('Document parsing timed out');

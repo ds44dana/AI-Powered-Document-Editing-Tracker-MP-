@@ -77,8 +77,6 @@ const FileCenterPage = () => {
       progress: 10
     });
     try {
-      // Log file details for debugging
-      console.log(`[upload] File: ${file.name}, type: ${file.type}, size: ${file.size} bytes`);
       // Simulate progress updates
       const progressInterval = setInterval(() => {
         setUploadStatus(prev => ({
@@ -134,18 +132,6 @@ const FileCenterPage = () => {
           code: 'UNSUPPORTED_FORMAT',
           actionable: true,
           suggestedAction: 'Upload a supported file format'
-        });
-      } else if (errorMessage.includes('images, shapes, or text in unsupported elements')) {
-        setUploadErrorDetails({
-          code: 'DOCX_COMPLEX_CONTENT',
-          actionable: true,
-          suggestedAction: 'Save as PDF and try uploading again'
-        });
-      } else if (errorMessage.includes('No text could be extracted')) {
-        setUploadErrorDetails({
-          code: 'NO_TEXT_EXTRACTED',
-          actionable: true,
-          suggestedAction: 'Try saving as PDF and uploading again'
         });
       }
       setUploadStatus({
@@ -248,21 +234,6 @@ const FileCenterPage = () => {
                   To remove password protection: Open the document in Word, go
                   to "File" → "Info" → "Protect Document" → "Encrypt with
                   Password" and remove the password.
-                </p>}
-              {uploadErrorDetails?.code === 'DOCX_NOT_VALID_ZIP' && <p className="text-sm mt-2">
-                  Word documents (.docx) are ZIP archives containing XML files.
-                  Your file appears to be corrupted. Try opening and resaving it
-                  in Word.
-                </p>}
-              {uploadErrorDetails?.code === 'DOCX_COMPLEX_CONTENT' && <p className="text-sm mt-2">
-                  This document may contain text in shapes, textboxes, or other
-                  complex elements that can't be extracted directly. Saving as
-                  PDF often preserves this text in a more accessible format.
-                </p>}
-              {uploadErrorDetails?.code === 'NO_TEXT_EXTRACTED' && <p className="text-sm mt-2">
-                  Check if your document contains actual text content (not just
-                  images or scanned pages). If it's a scanned document, try
-                  using a PDF with OCR processing.
                 </p>}
             </div>
             <button onClick={() => {
