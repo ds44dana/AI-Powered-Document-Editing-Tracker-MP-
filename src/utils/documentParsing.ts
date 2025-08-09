@@ -9,7 +9,7 @@ try {
   pdfjs = require('pdfjs-dist');
   // Set worker path for pdf.js (if available)
   if (pdfjs && pdfjs.GlobalWorkerOptions) {
-    const pdfjsWorker = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url);
+    const pdfjsWorker = new URL('pdfjs-dist/build/pdf.worker.min.js?url', import.meta.url);
     pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker.toString();
   }
 } catch (e) {

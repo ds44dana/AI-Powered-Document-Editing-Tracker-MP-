@@ -21,7 +21,7 @@
     "formidable": "latest",
     "mammoth": "latest",
     "buffer": "latest",
-    "pdfjs-dist/build/pdf": "latest"
+"pdfjs-dist": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.18",
